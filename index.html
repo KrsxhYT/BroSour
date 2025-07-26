@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dino Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: white;
+            font-family: 'Press Start 2P', cursive;
+        }
+        canvas {
+            display: block;
+            margin: 0 auto;
+        }
+        @font-face {
+            font-family: 'Press Start 2P';
+            src: url('assets/PressStart2P-Regular.ttf') format('truetype');
+        }
+        .game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: black;
+            font-size: 24px;
+        }
+        .score {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: black;
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="1280" height="720"></canvas>
+    <div id="scoreDisplay" class="score">0</div>
+    <div id="gameOver" class="game-over" style="display: none;">
+        <div>Game Over!</div>
+        <div id="finalScore">Score: 0</div>
+    </div>
+
+    <script>
+        // Game variables
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const gameOverDisplay = document.getElementById('gameOver');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        
+        let gameSpeed = 5;
+        let playerScore = 0;
+        let gameOver = false;
+        let obstacleTimer = 0;
+        let obstacleSpawn = false;
+        let obstacleCooldown = 1000;
+        let groundX = 0;
+        let lastTime = 0;
+        
+        // Load images
+        const images = {
+            ground: new Image(),
+            cloud: new Image(),
+            dino1: new Image(),
+            dino2: new Image(),
+            dinoDucking1: new Image(),
+            dinoDucking2: new Image(),
+            ptero1: new Image(),
+            ptero2: new Image()
+        };
+        
+        // Load cactus images
+        const cactusImages = [];
+        for (let i = 1; i <= 6; i++) {
+            cactusImages.push(new Image());
+        }
+        
+        // Set image sources
+        images.ground.src = 'assets/ground.png';
+        images.cloud.src = 'assets/cloud.png';
+        images.dino1.src = 'assets/Dino1.png';
+        images.dino2.src = 'assets/Dino2.png';
+        images.dinoDucking1.src = 'assets/DinoDucking1.png';
+        images.dinoDucking2.src = 'assets/DinoDucking2.png';
+        images.ptero1.src = 'assets/Ptero1.png';
+        images.ptero2.src = 'assets/Ptero2.png';
+        
+        for (let i = 0; i < 6; i++) {
+            cactusImages[i].src = `assets/cacti/cactus${i+1}.png`;
+        }
+        
+        // Load sounds
+        const sounds = {
+            death: new Audio('assets/sfx/lose.mp3'),
+            points: new Audio('assets/sfx/100points.mp3'),
+            jump: new Audio('assets/sfx/jump.mp3')
+        };
+        
+        // Game objects
+        class Cloud {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 200;
+                this.height = 80;
+            }
+            
+            update() {
+                this.x -= 1;
+            }
+            
+            draw() {
+                ctx.drawImage(images.cloud, this.x, this.y, this.width, this.height);
+            }
+        }
+        
+        class Dino {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 80;
+                this.height = 100;
+                this.runningSprites = [images.dino1, images.dino2];
+                this.duckingSprites = [images.dinoDucking1, images.dinoDucking2];
+                this.currentImage = 0;
+                this.velocity = 50;
+                this.gravity = 4.5;
+                this.ducking = false;
+                this.isJumping = false;
+                this.jumpHeight = 0;
+                this.maxJumpHeight = 200;
+            }
+            
+            jump() {
+                sounds.jump.play();
+                if (this.y >= 360 - this.height/2) {
+                    this.isJumping = true;
+                    this.jumpHeight = 0;
+                }
+            }
+            
+            duck() {
+                this.ducking = true;
+                this.height = 60;
+                this.width = 110;
+                this.y = 380;
+            }
+            
+            unduck() {
+                this.ducking = false;
+                this.height = 100;
+                this.width = 80;
+                this.y = 360;
+            }
+            
+            applyGravity() {
+                if (this.isJumping) {
+                    this.jumpHeight += this.velocity;
+                    this.y -= this.velocity;
+                    
+                    if (this.jumpHeight >= this.maxJumpHeight) {
+                        this.isJumping = false;
+                    }
+                } else if (this.y < 360 - this.height/2) {
+                    this.y += this.gravity;
+                }
+            }
+            
+            update() {
+                this.animate();
+                this.applyGravity();
+            }
+            
+            animate() {
+                this.currentImage += 0.05;
+                if (this.currentImage >= 2) {
+                    this.currentImage = 0;
+                }
+            }
+            
+            draw() {
+                if (this.ducking) {
+                    ctx.drawImage(
+                        this.duckingSprites[Math.floor(this.currentImage)], 
+                        this.x - this.width/2, 
+                        this.y - this.height/2, 
+                        this.width, 
+                        this.height
+                    );
+                } else {
+                    ctx.drawImage(
+                        this.runningSprites[Math.floor(this.currentImage)], 
+                        this.x - this.width/2, 
+                        this.y - this.height/2, 
+                        this.width, 
+                        this.height
+                    );
+                }
+            }
+            
+            getRect() {
+                return {
+                    x: this.x - this.width/2,
+                    y: this.y - this.height/2,
+                    width: this.width,
+                    height: this.height
+                };
+            }
+        }
+        
+        class Cactus {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 100;
+                this.height = 100;
+                this.sprite = cactusImages[Math.floor(Math.random() * cactusImages.length)];
+            }
+            
+            update() {
+                this.x -= gameSpeed;
+            }
+            
+            draw() {
+                ctx.drawImage(this.sprite, this.x - this.width/2, this.y - this.height/2, this.width, this.height);
+            }
+            
+            getRect() {
+                return {
+                    x: this.x - this.width/2,
+                    y: this.y - this.height/2,
+                    width: this.width,
+                    height: this.height
+                };
+            }
+        }
+        
+        class Ptero {
+            constructor() {
+                this.x = 1300;
+                this.y = [280, 295, 350][Math.floor(Math.random() * 3)];
+                this.width = 84;
+                this.height = 62;
+                this.sprites = [images.ptero1, images.ptero2];
+                this.currentImage = 0;
+            }
+            
+            update() {
+                this.animate();
+                this.x -= gameSpeed;
+            }
+            
+            animate() {
+                this.currentImage += 0.025;
+                if (this.currentImage >= 2) {
+                    this.currentImage = 0;
+                }
+            }
+            
+            draw() {
+                ctx.drawImage(
+                    this.sprites[Math.floor(this.currentImage)], 
+                    this.x - this.width/2, 
+                    this.y - this.height/2, 
+                    this.width, 
+                    this.height
+                );
+            }
+            
+            getRect() {
+                return {
+                    x: this.x - this.width/2,
+                    y: this.y - this.height/2,
+                    width: this.width,
+                    height: this.height
+                };
+            }
+        }
+        
+        // Game state
+        const cloudGroup = [];
+        const obstacleGroup = [];
+        const dino = new Dino(50, 360);
+        let lastCloudTime = 0;
+        let cloudInterval = 3000;
+        
+        // Collision detection
+        function checkCollision(rect1, rect2) {
+            return (
+                rect1.x < rect2.x + rect2.width &&
+                rect1.x + rect1.width > rect2.x &&
+                rect1.y < rect2.y + rect2.height &&
+                rect1.y + rect1.height > rect2.y
+            );
+        }
+        
+        // End game function
+        function endGame() {
+            gameOver = true;
+            gameOverDisplay.style.display = 'block';
+            finalScoreDisplay.textContent = `Score: ${Math.floor(playerScore)}`;
+            sounds.death.play();
+        }
+        
+        // Reset game function
+        function resetGame() {
+            gameOver = false;
+            gameSpeed = 5;
+            playerScore = 0;
+            obstacleGroup.length = 0;
+            cloudGroup.length = 0;
+            dino.y = 360;
+            dino.ducking = false;
+            dino.isJumping = false;
+            gameOverDisplay.style.display = 'none';
+        }
+        
+        // Game loop
+        function gameLoop(timestamp) {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Handle input
+            if (keys['ArrowDown']) {
+                dino.duck();
+            } else {
+                if (dino.ducking) {
+                    dino.unduck();
+                }
+            }
+            
+            if (!gameOver) {
+                // Update game speed and score
+                gameSpeed += 0.0025;
+                playerScore += 0.1;
+                scoreDisplay.textContent = Math.floor(playerScore);
+                
+                // Play points sound every 100 points
+                if (Math.floor(playerScore) % 100 === 0 && Math.floor(playerScore) > 0) {
+                    sounds.points.play();
+                }
+                
+                // Spawn obstacles
+                if (timestamp - obstacleTimer >= obstacleCooldown) {
+                    obstacleSpawn = true;
+                }
+                
+                if (obstacleSpawn) {
+                    const obstacleRandom = Math.floor(Math.random() * 50) + 1;
+                    if (obstacleRandom >= 1 && obstacleRandom <= 6) {
+                        obstacleGroup.push(new Cactus(1280, 340));
+                        obstacleTimer = timestamp;
+                        obstacleSpawn = false;
+                    } else if (obstacleRandom >= 7 && obstacleRandom <= 9) {
+                        obstacleGroup.push(new Ptero());
+                        obstacleTimer = timestamp;
+                        obstacleSpawn = false;
+                    }
+                }
+                
+                // Spawn clouds
+                if (timestamp - lastCloudTime >= cloudInterval) {
+                    const cloudY = Math.floor(Math.random() * 250) + 50;
+                    cloudGroup.push(new Cloud(1380, cloudY));
+                    lastCloudTime = timestamp;
+                }
+                
+                // Update and draw clouds
+                for (let i = 0; i < cloudGroup.length; i++) {
+                    cloudGroup[i].update();
+                    cloudGroup[i].draw();
+                    
+                    // Remove clouds that are off screen
+                    if (cloudGroup[i].x < -200) {
+                        cloudGroup.splice(i, 1);
+                        i--;
+                    }
+                }
+                
+                // Update and draw obstacles
+                for (let i = 0; i < obstacleGroup.length; i++) {
+                    obstacleGroup[i].update();
+                    obstacleGroup[i].draw();
+                    
+                    // Remove obstacles that are off screen
+                    if (obstacleGroup[i].x < -100) {
+                        obstacleGroup.splice(i, 1);
+                        i--;
+                    }
+                    
+                    // Check collisions
+                    if (checkCollision(dino.getRect(), obstacleGroup[i].getRect())) {
+                        endGame();
+                    }
+                }
+                
+                // Update and draw dino
+                dino.update();
+                dino.draw();
+                
+                // Update ground position
+                groundX -= gameSpeed;
+                
+                // Draw ground
+                ctx.drawImage(images.ground, groundX, 360, 1280, 20);
+                ctx.drawImage(images.ground, groundX + 1280, 360, 1280, 20);
+                
+                if (groundX <= -1280) {
+                    groundX = 0;
+                }
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Keyboard input
+        const keys = {};
+        window.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            
+            if ((e.key === ' ' || e.key === 'ArrowUp') && !dino.isJumping) {
+                dino.jump();
+                
+                if (gameOver) {
+                    resetGame();
+                }
+            }
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+        
+        // Start the game
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+  </html>
